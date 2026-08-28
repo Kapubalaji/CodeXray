@@ -29,8 +29,9 @@ export default function App() {
 
   const handleVisualize = async () => {
     setIsRunning(true);
+    setCompilationData(null);
     
-    // Reset stage states
+    // Reset stage states to pending
     const resetStates = {};
     STAGE_ORDER.forEach(id => {
       resetStates[id] = { status: 'pending' };
@@ -40,13 +41,13 @@ export default function App() {
 
     // Fetch compilation result (from mock API)
     const data = await compileCode('sum.c', code);
-    setCompilationData(data);
 
     // Run sequential step-by-step animation runner
     let stepIndex = 0;
-    const interval = setInterval(() => {
+    
+    const processNextStage = () => {
       if (stepIndex >= STAGE_ORDER.length) {
-        clearInterval(interval);
+        setCompilationData(data);
         setIsRunning(false);
         return;
       }
@@ -55,38 +56,47 @@ export default function App() {
       const targetStageData = data.stages[stageId];
 
       if (!targetStageData || targetStageData.status === 'not_executed') {
-        // Stop execution animation if stage was not executed
         setStagesState(prev => ({
           ...prev,
           [stageId]: { status: 'not_executed' }
         }));
-        clearInterval(interval);
+        setCompilationData(data);
         setIsRunning(false);
         return;
       }
 
-      // Mark current stage active and update status from data
+      // Step 1: Set stage to 'running'
       setActiveStageId(stageId);
       setStagesState(prev => ({
         ...prev,
-        [stageId]: targetStageData
+        [stageId]: { ...targetStageData, status: 'running' }
       }));
 
-      // If this stage failed, halt the remaining stages
-      if (targetStageData.status === 'failed') {
-        // Mark remaining stages as not_executed
-        const haltStates = {};
-        for (let i = stepIndex + 1; i < STAGE_ORDER.length; i++) {
-          haltStates[STAGE_ORDER[i]] = { status: 'not_executed' };
-        }
-        setStagesState(prev => ({ ...prev, ...haltStates }));
-        clearInterval(interval);
-        setIsRunning(false);
-        return;
-      }
+      // Step 2: After 400ms delay, finalize stage result (success or failed)
+      setTimeout(() => {
+        setStagesState(prev => ({
+          ...prev,
+          [stageId]: targetStageData
+        }));
 
-      stepIndex++;
-    }, 400); // 400ms delay per stage transition
+        if (targetStageData.status === 'failed') {
+          const haltStates = {};
+          for (let i = stepIndex + 1; i < STAGE_ORDER.length; i++) {
+            haltStates[STAGE_ORDER[i]] = { status: 'not_executed' };
+          }
+          setStagesState(prev => ({ ...prev, ...haltStates }));
+          setCompilationData(data);
+          setIsRunning(false);
+          return;
+        }
+
+        stepIndex++;
+        // Short pause between stages before starting next stage
+        setTimeout(processNextStage, 150);
+      }, 450);
+    };
+
+    processNextStage();
   };
 
   const activeStageData = compilationData?.stages?.[activeStageId] || stagesState[activeStageId];
